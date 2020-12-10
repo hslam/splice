@@ -43,6 +43,8 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 	syscall.ForkLock.RUnlock()
 	rFd := int(p[0])
 	wFd := int(p[1])
+	defer syscall.Close(rFd)
+	defer syscall.Close(wFd)
 	if len > maxSpliceSize {
 		len = maxSpliceSize
 	}
