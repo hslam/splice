@@ -25,7 +25,7 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 	}
 	shmid, buf, err := shm.GetAttach(shm.IPC_PRIVATE, bufferSize, 0)
 	if err != nil {
-		return 0, err
+		return spliceBuffer(dst, src, len)
 	}
 	defer shm.Remove(shmid)
 	defer shm.Detach(buf)
