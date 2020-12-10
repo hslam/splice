@@ -7,6 +7,8 @@ package splice
 import (
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -23,19 +25,42 @@ const (
 	EAGAIN = syscall.EAGAIN
 )
 
-// EOF is the error returned by Read when no more input is available.
-// Functions should return EOF only to signal a graceful end of input.
-// If the EOF occurs unexpectedly in a structured data stream,
-// the appropriate error is either ErrUnexpectedEOF or some other error
-// giving more detail.
-var EOF = io.EOF
+var (
+	// EOF is the error returned by Read when no more input is available.
+	// Functions should return EOF only to signal a graceful end of input.
+	// If the EOF occurs unexpectedly in a structured data stream,
+	// the appropriate error is either ErrUnexpectedEOF or some other error
+	// giving more detail.
+	EOF = io.EOF
+
+	buffers = sync.Map{}
+	assign  int32
+)
+
+func assignPool(size int) *sync.Pool {
+	for {
+		if p, ok := buffers.Load(size); ok {
+			return p.(*sync.Pool)
+		}
+		if atomic.CompareAndSwapInt32(&assign, 0, 1) {
+			var pool = &sync.Pool{New: func() interface{} {
+				return make([]byte, size)
+			}}
+			buffers.Store(size, pool)
+			atomic.StoreInt32(&assign, 0)
+			return pool
+		}
+	}
+}
 
 func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 	bufferSize := maxSpliceSize
 	if bufferSize < int(len) {
 		bufferSize = int(len)
 	}
-	buf := make([]byte, bufferSize)
+	pool := assignPool(bufferSize)
+	buf := pool.Get().([]byte)
+	defer pool.Put(buf)
 	var retain int
 	retain, err = src.Read(buf)
 	if err != nil {
