@@ -14,7 +14,7 @@ const (
 
 	// maxSpliceSize is the maximum amount of data Splice asks
 	// the kernel to move in a single call to splice(2).
-	maxSpliceSize = 4 << 20
+	maxSpliceSize = 64 << 10
 
 	// EAGAIN will be returned when resource temporarily unavailable.
 	EAGAIN = syscall.EAGAIN
