@@ -5,7 +5,10 @@
 package splice
 
 import (
+	"io"
+	"net"
 	"syscall"
+	"time"
 )
 
 const (
@@ -19,3 +22,39 @@ const (
 	// EAGAIN will be returned when resource temporarily unavailable.
 	EAGAIN = syscall.EAGAIN
 )
+
+// EOF is the error returned by Read when no more input is available.
+// Functions should return EOF only to signal a graceful end of input.
+// If the EOF occurs unexpectedly in a structured data stream,
+// the appropriate error is either ErrUnexpectedEOF or some other error
+// giving more detail.
+var EOF = io.EOF
+
+func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
+	bufferSize := maxSpliceSize
+	if bufferSize < int(len) {
+		bufferSize = int(len)
+	}
+	buf := make([]byte, bufferSize)
+	var retain int
+	retain, err = src.Read(buf)
+	if err != nil {
+		return 0, err
+	}
+	var out int
+	var pos int
+	for retain > 0 {
+		out, err = dst.Write(buf[pos : pos+retain])
+		if out > 0 {
+			retain -= out
+			n += int64(out)
+			pos += out
+			continue
+		}
+		if err != syscall.EAGAIN {
+			return n, err
+		}
+		time.Sleep(time.Microsecond * 10)
+	}
+	return n, nil
+}
