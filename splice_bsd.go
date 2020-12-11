@@ -12,23 +12,44 @@ import (
 	"time"
 )
 
+// NewContext returns a new context.
+func NewContext() (*Context, error) {
+	shmid, buf, err := shm.GetAttach(shm.IPC_PRIVATE, maxSpliceSize, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &Context{buffer: buf, shmid: shmid}, nil
+}
+
+// Close closes the context.
+func (ctx *Context) Close() {
+	shm.Remove(ctx.shmid)
+	shm.Detach(ctx.buffer)
+}
+
 // Splice wraps the splice system call.
 //
 // splice() moves data between two file descriptors without copying between
 // kernel address space and user address space. It transfers up to len bytes
 // of data from the file descriptor rfd to the file descriptor wfd,
 // where one of the descriptors must refer to a pipe.
-func Splice(dst, src net.Conn, len int64) (n int64, err error) {
+func Splice(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
 	bufferSize := maxSpliceSize
 	if bufferSize < int(len) {
 		bufferSize = int(len)
 	}
-	shmid, buf, err := shm.GetAttach(shm.IPC_PRIVATE, bufferSize, 0)
-	if err != nil {
-		return spliceBuffer(dst, src, len)
+	var buf []byte
+	if ctx != nil {
+		buf = ctx.buffer[:bufferSize]
+	} else {
+		var shmid int
+		shmid, buf, err = shm.GetAttach(shm.IPC_PRIVATE, bufferSize, 0)
+		if err != nil {
+			return spliceBuffer(dst, src, nil, len)
+		}
+		defer shm.Remove(shmid)
+		defer shm.Detach(buf)
 	}
-	defer shm.Remove(shmid)
-	defer shm.Detach(buf)
 	var retain int
 	retain, err = src.Read(buf)
 	if err != nil {

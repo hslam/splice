@@ -15,36 +15,63 @@ import (
 // ErrSyscallConn will be returned when the net.Conn do not implements the syscall.Conn interface.
 var ErrSyscallConn = errors.New("The net.Conn do not implements the syscall.Conn interface")
 
+// NewContext returns a new context.
+func NewContext() (*Context, error) {
+	var p [2]int
+	syscall.ForkLock.RLock()
+	err := syscall.Pipe(p[0:])
+	if err != nil {
+		syscall.ForkLock.RUnlock()
+		return nil, err
+	}
+	syscall.CloseOnExec(p[0])
+	syscall.CloseOnExec(p[1])
+	syscall.ForkLock.RUnlock()
+	return &Context{reader: int(p[0]), writer: int(p[1])}, nil
+}
+
+// Close closes the context.
+func (ctx *Context) Close() {
+	syscall.Close(ctx.Reader)
+	syscall.Close(ctx.Writer)
+}
+
 // Splice wraps the splice system call.
 //
 // splice() moves data between two file descriptors without copying between
 // kernel address space and user address space. It transfers up to len bytes
 // of data from the file descriptor rfd to the file descriptor wfd,
 // where one of the descriptors must refer to a pipe.
-func Splice(dst, src net.Conn, len int64) (n int64, err error) {
+func Splice(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
 	var srcFd, dstFd int
 	dstFd, err = netFd(dst)
 	if err != nil {
-		return 0, err
+		return spliceBuffer(dst, src, nil, len)
 	}
 	srcFd, err = netFd(src)
 	if err != nil {
-		return 0, err
+		return spliceBuffer(dst, src, nil, len)
 	}
-	var p [2]int
-	syscall.ForkLock.RLock()
-	err = syscall.Pipe(p[0:])
-	if err != nil {
+	var rFd, wFd int
+	if ctx != nil {
+		rFd = ctx.reader
+		wFd = ctx.writer
+	} else {
+		var p [2]int
+		syscall.ForkLock.RLock()
+		err = syscall.Pipe(p[0:])
+		if err != nil {
+			syscall.ForkLock.RUnlock()
+			return spliceBuffer(dst, src, nil, len)
+		}
+		syscall.CloseOnExec(p[0])
+		syscall.CloseOnExec(p[1])
 		syscall.ForkLock.RUnlock()
-		return 0, err
+		rFd = int(p[0])
+		wFd = int(p[1])
+		defer syscall.Close(rFd)
+		defer syscall.Close(wFd)
 	}
-	syscall.CloseOnExec(p[0])
-	syscall.CloseOnExec(p[1])
-	syscall.ForkLock.RUnlock()
-	rFd := int(p[0])
-	wFd := int(p[1])
-	defer syscall.Close(rFd)
-	defer syscall.Close(wFd)
 	if len > maxSpliceSize {
 		len = maxSpliceSize
 	}

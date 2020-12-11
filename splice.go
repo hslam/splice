@@ -53,14 +53,28 @@ func assignPool(size int) *sync.Pool {
 	}
 }
 
-func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
+// Context represents a splice context.
+type Context struct {
+	buffer []byte
+	writer int
+	reader int
+	shmid  int
+	pool   *sync.Pool
+}
+
+func spliceBuffer(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
 	bufferSize := maxSpliceSize
 	if bufferSize < int(len) {
 		bufferSize = int(len)
 	}
-	pool := assignPool(bufferSize)
-	buf := pool.Get().([]byte)
-	defer pool.Put(buf)
+	var buf []byte
+	if ctx != nil {
+		buf = ctx.buffer[:bufferSize]
+	} else {
+		pool := assignPool(bufferSize)
+		buf = pool.Get().([]byte)
+		defer pool.Put(buf)
+	}
 	var retain int
 	retain, err = src.Read(buf)
 	if err != nil {
