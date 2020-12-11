@@ -5,8 +5,10 @@
 package splice
 
 import (
+	"errors"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -14,18 +16,20 @@ import (
 )
 
 const (
-	// spliceNonblock makes calls to splice(2) non-blocking.
-	spliceNonblock = 0x2
-
-	// maxSpliceSize is the maximum amount of data Splice asks
-	// the kernel to move in a single call to splice(2).
-	maxSpliceSize = 64 << 10
+	idleTime        = time.Second
+	maxIdleContexts = 256
 
 	// EAGAIN will be returned when resource temporarily unavailable.
 	EAGAIN = syscall.EAGAIN
 )
 
 var (
+	bucketsLen = runtime.NumCPU()
+	buckets    = make([]bucket, bucketsLen)
+
+	buffers = sync.Map{}
+	assign  int32
+
 	// EOF is the error returned by Read when no more input is available.
 	// Functions should return EOF only to signal a graceful end of input.
 	// If the EOF occurs unexpectedly in a structured data stream,
@@ -33,8 +37,8 @@ var (
 	// giving more detail.
 	EOF = io.EOF
 
-	buffers = sync.Map{}
-	assign  int32
+	// ErrNotHandled will be returned when the splice is not supported.
+	ErrNotHandled = errors.New("The splice is not supported")
 )
 
 func assignPool(size int) *sync.Pool {
@@ -53,28 +57,130 @@ func assignPool(size int) *sync.Pool {
 	}
 }
 
-// Context represents a splice context.
-type Context struct {
+// context represents a splice context.
+type context struct {
 	buffer []byte
 	writer int
 	reader int
 	shmid  int
 	pool   *sync.Pool
+	bucket *bucket
 }
 
-func spliceBuffer(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
+type bucket struct {
+	lock     sync.Mutex
+	created  bool
+	pending  map[*context]struct{}
+	queue    []*context
+	lastIdle time.Time
+}
+
+func assignBucket(id int) *bucket {
+	return &buckets[id%bucketsLen]
+}
+
+func (b *bucket) GetInstance() *bucket {
+	b.lock.Lock()
+	if !b.created {
+		b.created = true
+		b.pending = make(map[*context]struct{})
+		b.lock.Unlock()
+		b.lastIdle = time.Now()
+		go b.run()
+	} else {
+		b.lock.Unlock()
+	}
+	return b
+}
+
+func (b *bucket) run() {
+	idleContexts := make([]*context, maxSpliceSize)
+	var idles int
+	for {
+		if b.lastIdle.Add(idleTime).Before(time.Now()) {
+			b.lock.Lock()
+			if len(b.pending) == 0 {
+				b.created = false
+				b.lock.Unlock()
+				break
+			}
+			b.lock.Unlock()
+		}
+		time.Sleep(time.Second)
+		b.lock.Lock()
+		idles = copy(idleContexts, b.queue[len(b.queue)/2:])
+		if idles > 0 {
+			b.queue = b.queue[:len(b.queue)-idles]
+			for _, ctx := range idleContexts {
+				delete(b.pending, ctx)
+			}
+		}
+		b.lock.Unlock()
+		if idles > 0 {
+			for _, ctx := range idleContexts[:idles] {
+				ctx.Close()
+			}
+		}
+	}
+}
+
+func (b *bucket) Get() (ctx *context, err error) {
+	b.lock.Lock()
+	if len(b.queue) > 0 {
+		ctx = b.queue[0]
+		n := copy(b.queue, b.queue[1:])
+		b.queue = b.queue[:n]
+		b.lock.Unlock()
+	} else {
+		b.lock.Unlock()
+		ctx, err = newContext(b)
+		if err != nil {
+			return nil, err
+		}
+		b.lock.Lock()
+		b.pending[ctx] = struct{}{}
+		b.lock.Unlock()
+	}
+	b.lastIdle = time.Now()
+	return
+}
+
+func (b *bucket) Free(ctx *context) {
+	b.lock.Lock()
+	if len(b.queue) < maxIdleContexts {
+		b.queue = append(b.queue, ctx)
+		b.lock.Unlock()
+	} else {
+		delete(b.pending, ctx)
+		b.lock.Unlock()
+		ctx.Close()
+	}
+}
+
+func (b *bucket) Release() {
+	b.lock.Lock()
+	if b.pending == nil || len(b.pending) == 0 {
+		b.lock.Unlock()
+		return
+	}
+	pending := b.pending
+	b.pending = make(map[*context]struct{})
+	b.queue = []*context{}
+	b.lock.Unlock()
+	for ctx := range pending {
+		ctx.Close()
+	}
+}
+
+func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 	bufferSize := maxSpliceSize
 	if bufferSize < int(len) {
 		bufferSize = int(len)
 	}
 	var buf []byte
-	if ctx != nil {
-		buf = ctx.buffer[:bufferSize]
-	} else {
-		pool := assignPool(bufferSize)
-		buf = pool.Get().([]byte)
-		defer pool.Put(buf)
-	}
+	pool := assignPool(bufferSize)
+	buf = pool.Get().([]byte)
+	defer pool.Put(buf)
 	var retain int
 	retain, err = src.Read(buf)
 	if err != nil {

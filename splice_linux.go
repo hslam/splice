@@ -12,11 +12,20 @@ import (
 	"time"
 )
 
+const (
+	// spliceNonblock makes calls to splice(2) non-blocking.
+	spliceNonblock = 0x2
+
+	// maxSpliceSize is the maximum amount of data Splice asks
+	// the kernel to move in a single call to splice(2).
+	maxSpliceSize = 4 << 20
+)
+
 // ErrSyscallConn will be returned when the net.Conn do not implements the syscall.Conn interface.
 var ErrSyscallConn = errors.New("The net.Conn do not implements the syscall.Conn interface")
 
-// NewContext returns a new context.
-func NewContext() (*Context, error) {
+// newContext returns a new context.
+func newContext(b *bucket) (*context, error) {
 	var p [2]int
 	syscall.ForkLock.RLock()
 	err := syscall.Pipe(p[0:])
@@ -27,11 +36,11 @@ func NewContext() (*Context, error) {
 	syscall.CloseOnExec(p[0])
 	syscall.CloseOnExec(p[1])
 	syscall.ForkLock.RUnlock()
-	return &Context{reader: int(p[0]), writer: int(p[1])}, nil
+	return &context{reader: int(p[0]), writer: int(p[1]), bucket: b}, nil
 }
 
 // Close closes the context.
-func (ctx *Context) Close() {
+func (ctx *context) Close() {
 	syscall.Close(ctx.reader)
 	syscall.Close(ctx.writer)
 }
@@ -42,36 +51,26 @@ func (ctx *Context) Close() {
 // kernel address space and user address space. It transfers up to len bytes
 // of data from the file descriptor rfd to the file descriptor wfd,
 // where one of the descriptors must refer to a pipe.
-func Splice(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
+func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 	var srcFd, dstFd int
 	dstFd, err = netFd(dst)
 	if err != nil {
-		return spliceBuffer(dst, src, nil, len)
+		return spliceBuffer(dst, src, len)
 	}
 	srcFd, err = netFd(src)
 	if err != nil {
-		return spliceBuffer(dst, src, nil, len)
+		return spliceBuffer(dst, src, len)
 	}
 	var rFd, wFd int
-	if ctx != nil {
-		rFd = ctx.reader
-		wFd = ctx.writer
-	} else {
-		var p [2]int
-		syscall.ForkLock.RLock()
-		err = syscall.Pipe(p[0:])
-		if err != nil {
-			syscall.ForkLock.RUnlock()
-			return spliceBuffer(dst, src, nil, len)
-		}
-		syscall.CloseOnExec(p[0])
-		syscall.CloseOnExec(p[1])
-		syscall.ForkLock.RUnlock()
-		rFd = int(p[0])
-		wFd = int(p[1])
-		defer syscall.Close(rFd)
-		defer syscall.Close(wFd)
+	b := assignBucket(dstFd).GetInstance()
+	var ctx *context
+	ctx, err = b.Get()
+	if err != nil {
+		return 0, ErrNotHandled
 	}
+	defer b.Free(ctx)
+	rFd = ctx.reader
+	wFd = ctx.writer
 	if len > maxSpliceSize {
 		len = maxSpliceSize
 	}

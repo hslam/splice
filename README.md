@@ -41,7 +41,7 @@ func main() {
 		conn, _ := lis.Accept()
 		defer conn.Close()
 		time.Sleep(time.Millisecond * 100)
-		if _, err := splice.Splice(conn, conn, nil, 1024); err != nil && err != io.EOF {
+		if _, err := splice.Splice(conn, conn, 1024); err != nil && err != io.EOF {
 			panic(err)
 		}
 		close(done)

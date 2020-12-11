@@ -1,7 +1,7 @@
 // Copyright (c) 2020 Meng Huang (mhboy@outlook.com)
 // This package is licensed under a MIT license that can be found in the LICENSE file.
 
-// +build !darwin,!linux,!dragonfly,!freebsd,!netbsd,!openbsd
+// +build !linux
 
 package splice
 
@@ -9,15 +9,21 @@ import (
 	"net"
 )
 
-// NewContext returns a new context.
-func NewContext() (*Context, error) {
+const (
+	// maxSpliceSize is the maximum amount of data Splice asks
+	// the kernel to move in a single call to splice(2).
+	maxSpliceSize = 64 << 10
+)
+
+// newContext returns a new context.
+func newContext(b *bucket) (*context, error) {
 	pool := assignPool(maxSpliceSize)
 	buf := pool.Get().([]byte)
-	return &Context{buffer: buf, pool: pool}, nil
+	return &context{buffer: buf, pool: pool, bucket: b}, nil
 }
 
 // Close closes the context.
-func (ctx *Context) Close() {
+func (ctx *context) Close() {
 	ctx.pool.Put(ctx.buffer[:cap(ctx.buffer)])
 }
 
@@ -27,6 +33,6 @@ func (ctx *Context) Close() {
 // kernel address space and user address space. It transfers up to len bytes
 // of data from the file descriptor rfd to the file descriptor wfd,
 // where one of the descriptors must refer to a pipe.
-func Splice(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
-	return spliceBuffer(dst, src, ctx, len)
+func Splice(dst, src net.Conn, len int64) (n int64, err error) {
+	return spliceBuffer(dst, src, len)
 }
