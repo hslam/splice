@@ -69,6 +69,7 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 		return 0, ErrNotHandled
 	}
 	defer b.Free(ctx)
+	ctx.alive = false
 	rFd = ctx.reader
 	wFd = ctx.writer
 	if len > maxSpliceSize {
@@ -97,6 +98,7 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 		}
 		time.Sleep(time.Microsecond * 10)
 	}
+	ctx.alive = true
 	return n, nil
 }
 

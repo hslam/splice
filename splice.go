@@ -62,9 +62,9 @@ type context struct {
 	buffer []byte
 	writer int
 	reader int
-	shmid  int
 	pool   *sync.Pool
 	bucket *bucket
+	alive  bool
 }
 
 type bucket struct {
@@ -147,7 +147,7 @@ func (b *bucket) Get() (ctx *context, err error) {
 
 func (b *bucket) Free(ctx *context) {
 	b.lock.Lock()
-	if len(b.queue) < maxIdleContexts {
+	if len(b.queue) < maxIdleContexts && ctx.alive {
 		b.queue = append(b.queue, ctx)
 		b.lock.Unlock()
 	} else {
