@@ -32,8 +32,8 @@ func NewContext() (*Context, error) {
 
 // Close closes the context.
 func (ctx *Context) Close() {
-	syscall.Close(ctx.Reader)
-	syscall.Close(ctx.Writer)
+	syscall.Close(ctx.reader)
+	syscall.Close(ctx.writer)
 }
 
 // Splice wraps the splice system call.

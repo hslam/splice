@@ -7,20 +7,18 @@ package splice
 
 import (
 	"net"
-	"syscall"
-	"time"
 )
 
 // NewContext returns a new context.
 func NewContext() (*Context, error) {
 	pool := assignPool(maxSpliceSize)
 	buf := pool.Get().([]byte)
-	return &Context{Buffer: buf, pool: pool}, nil
+	return &Context{buffer: buf, pool: pool}, nil
 }
 
 // Close closes the context.
 func (ctx *Context) Close() {
-	ctx.pool.Put(ctx.Buffer[:cap(ctx.Buffer)])
+	ctx.pool.Put(ctx.buffer[:cap(ctx.buffer)])
 }
 
 // Splice wraps the splice system call.
@@ -29,6 +27,6 @@ func (ctx *Context) Close() {
 // kernel address space and user address space. It transfers up to len bytes
 // of data from the file descriptor rfd to the file descriptor wfd,
 // where one of the descriptors must refer to a pipe.
-func Splice(dst, src net.Conn, ctx *Context, len int64) (ok bool, n int64, err error) {
+func Splice(dst, src net.Conn, ctx *Context, len int64) (n int64, err error) {
 	return spliceBuffer(dst, src, ctx, len)
 }
