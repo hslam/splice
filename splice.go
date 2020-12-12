@@ -186,6 +186,9 @@ func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 	if err != nil {
 		return 0, err
 	}
+	if retain == 0 {
+		return 0, EOF
+	}
 	var out int
 	var pos int
 	for retain > 0 {
@@ -197,7 +200,7 @@ func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 			continue
 		}
 		if err != syscall.EAGAIN {
-			return n, err
+			return n, EOF
 		}
 	}
 	return n, nil
