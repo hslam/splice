@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net"
 	"syscall"
-	"time"
 )
 
 const (
@@ -96,7 +95,6 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 		if err != syscall.EAGAIN {
 			return n, EOF
 		}
-		time.Sleep(time.Microsecond * 10)
 	}
 	ctx.alive = true
 	return n, nil

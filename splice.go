@@ -199,7 +199,6 @@ func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 		if err != syscall.EAGAIN {
 			return n, err
 		}
-		time.Sleep(time.Microsecond * 10)
 	}
 	return n, nil
 }
