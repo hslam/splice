@@ -1,6 +1,6 @@
 # splice
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/hslam/splice)](https://pkg.go.dev/github.com/hslam/splice)
-[![Build Status](https://travis-ci.org/hslam/splice.svg?branch=master)](https://travis-ci.org/hslam/splice)
+[![Build Status](https://api.travis-ci.com/hslam/splice.svg?branch=master)](https://travis-ci.com/hslam/splice)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hslam/splice)](https://goreportcard.com/report/github.com/hslam/splice)
 [![LICENSE](https://img.shields.io/github/license/hslam/splice.svg?style=flat-square)](https://github.com/hslam/splice/blob/master/LICENSE)
 
