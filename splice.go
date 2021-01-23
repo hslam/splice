@@ -181,20 +181,20 @@ func spliceBuffer(dst, src net.Conn, len int64) (n int64, err error) {
 	pool := assignPool(bufferSize)
 	buf = pool.Get().([]byte)
 	defer pool.Put(buf)
-	var retain int
-	retain, err = src.Read(buf)
+	var remain int
+	remain, err = src.Read(buf)
 	if err != nil {
 		return 0, err
 	}
-	if retain == 0 {
+	if remain == 0 {
 		return 0, EOF
 	}
 	var out int
 	var pos int
-	for retain > 0 {
-		out, err = dst.Write(buf[pos : pos+retain])
+	for remain > 0 {
+		out, err = dst.Write(buf[pos : pos+remain])
 		if out > 0 {
-			retain -= out
+			remain -= out
 			n += int64(out)
 			pos += out
 			continue

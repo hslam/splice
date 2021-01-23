@@ -74,21 +74,21 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 	if len > maxSpliceSize {
 		len = maxSpliceSize
 	}
-	var retain int64
-	// If retain == 0 && err == nil, src is at EOF, and the
+	var remain int64
+	// If remain == 0 && err == nil, src is at EOF, and the
 	// transfer is complete.
-	retain, err = splice(srcFd, nil, wFd, nil, int(len), spliceNonblock)
+	remain, err = splice(srcFd, nil, wFd, nil, int(len), spliceNonblock)
 	if err != nil {
 		return 0, err
 	}
-	if retain == 0 {
+	if remain == 0 {
 		return 0, EOF
 	}
 	var out int64
-	for retain > 0 {
-		out, err = splice(rFd, nil, dstFd, nil, int(retain), spliceNonblock)
+	for remain > 0 {
+		out, err = splice(rFd, nil, dstFd, nil, int(remain), spliceNonblock)
 		if out > 0 {
-			retain -= out
+			remain -= out
 			n += out
 			continue
 		}
