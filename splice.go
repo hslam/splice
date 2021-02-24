@@ -17,7 +17,7 @@ import (
 
 const (
 	idleTime        = time.Second
-	maxIdleContexts = 256
+	maxIdleContexts = 8192
 
 	// EAGAIN will be returned when resource temporarily unavailable.
 	EAGAIN = syscall.EAGAIN
