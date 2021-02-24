@@ -94,7 +94,7 @@ func (b *bucket) GetInstance() *bucket {
 }
 
 func (b *bucket) run() {
-	idleContexts := make([]*context, maxSpliceSize)
+	idleContexts := make([]*context, maxIdleContexts)
 	var idles int
 	for {
 		if b.lastIdle.Add(idleTime).Before(time.Now()) {
