@@ -139,3 +139,55 @@ func TestSpliceBuffer(t *testing.T) {
 	conn.Close()
 	wg.Wait()
 }
+
+func TestBucket(t *testing.T) {
+	if contexts(maxContexts/maxContextsPerBucket) < 0 {
+		t.Error()
+	}
+	MaxIdleContextsPerBucket(maxIdleContexts)
+	var ctxs = make([]*context, maxIdleContexts+1)
+	for i := 0; i < len(ctxs); i++ {
+		ctx, err := assignBucket(0).GetInstance().Get()
+		if err != nil {
+			t.Error(err)
+		} else {
+			ctx.alive = true
+			ctxs[i] = ctx
+		}
+	}
+	for i := 0; i < len(ctxs); i++ {
+		ctx := ctxs[i]
+		assignBucket(0).GetInstance().Free(ctx)
+	}
+	{
+		ctx, err := assignBucket(0).GetInstance().Get()
+		if err != nil {
+			t.Error(err)
+		} else {
+			ctx.alive = true
+			assignBucket(0).GetInstance().Free(ctx)
+		}
+	}
+	time.Sleep(time.Second * 2)
+	assignBucket(0).GetInstance().Release()
+	assignBucket(0).GetInstance().Release()
+	{
+		ctx, err := assignBucket(0).GetInstance().Get()
+		if err != nil {
+			t.Error(err)
+		} else {
+			ctx.alive = true
+			assignBucket(0).GetInstance().Free(ctx)
+		}
+	}
+	time.Sleep(time.Second * 2)
+}
+
+func TestAssignPool(t *testing.T) {
+	p := assignPool(1024)
+	b := p.Get().([]byte)
+	if len(b) < 1024 {
+		t.Error(len(b))
+	}
+	assignPool(1024)
+}
