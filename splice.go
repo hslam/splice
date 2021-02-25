@@ -16,19 +16,20 @@ import (
 )
 
 const (
-	idleTime        = time.Second
-	maxIdleContexts = 8192
+	idleTime             = time.Second
+	maxContexts          = 16384
+	maxContextsPerBucket = 256
 
 	// EAGAIN will be returned when resource temporarily unavailable.
 	EAGAIN = syscall.EAGAIN
 )
 
 var (
-	bucketsLen = runtime.NumCPU()
-	buckets    = make([]bucket, bucketsLen)
-
-	buffers = sync.Map{}
-	assign  int32
+	bucketsLen      = runtime.NumCPU()
+	buckets         = make([]bucket, bucketsLen)
+	maxIdleContexts = contexts(bucketsLen)
+	buffers         = sync.Map{}
+	assign          int32
 
 	// EOF is the error returned by Read when no more input is available.
 	// Functions should return EOF only to signal a graceful end of input.
@@ -40,6 +41,20 @@ var (
 	// ErrNotHandled will be returned when the splice is not supported.
 	ErrNotHandled = errors.New("The splice is not supported")
 )
+
+func contexts(bucketsLen int) int {
+	if bucketsLen < maxContexts/maxContextsPerBucket {
+		return maxContextsPerBucket
+	}
+	return maxContexts / bucketsLen
+}
+
+// MaxIdleContextsPerBucket sets the maxIdleContexts per bucket.
+func MaxIdleContextsPerBucket(max int) {
+	if max > 0 && max*bucketsLen < maxContexts*2 {
+		maxIdleContexts = max
+	}
+}
 
 func assignPool(size int) *sync.Pool {
 	for {
@@ -68,11 +83,12 @@ type context struct {
 }
 
 type bucket struct {
-	lock     sync.Mutex
-	created  bool
-	pending  map[*context]struct{}
-	queue    []*context
-	lastIdle time.Time
+	lock            sync.Mutex
+	created         bool
+	pending         map[*context]struct{}
+	queue           []*context
+	maxIdleContexts int
+	lastIdle        time.Time
 }
 
 func assignBucket(id int) *bucket {
@@ -84,6 +100,7 @@ func (b *bucket) GetInstance() *bucket {
 	if !b.created {
 		b.created = true
 		b.pending = make(map[*context]struct{})
+		b.maxIdleContexts = maxIdleContexts
 		b.lock.Unlock()
 		b.lastIdle = time.Now()
 		go b.run()
@@ -94,7 +111,7 @@ func (b *bucket) GetInstance() *bucket {
 }
 
 func (b *bucket) run() {
-	idleContexts := make([]*context, maxIdleContexts)
+	idleContexts := make([]*context, b.maxIdleContexts)
 	var idles int
 	for {
 		if b.lastIdle.Add(idleTime).Before(time.Now()) {
@@ -131,23 +148,23 @@ func (b *bucket) Get() (ctx *context, err error) {
 		n := copy(b.queue, b.queue[1:])
 		b.queue = b.queue[:n]
 		b.lock.Unlock()
+		b.lastIdle = time.Now()
 	} else {
 		b.lock.Unlock()
 		ctx, err = newContext(b)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			b.lock.Lock()
+			b.pending[ctx] = struct{}{}
+			b.lock.Unlock()
+			b.lastIdle = time.Now()
 		}
-		b.lock.Lock()
-		b.pending[ctx] = struct{}{}
-		b.lock.Unlock()
 	}
-	b.lastIdle = time.Now()
 	return
 }
 
 func (b *bucket) Free(ctx *context) {
 	b.lock.Lock()
-	if len(b.queue) < maxIdleContexts && ctx.alive {
+	if len(b.queue) < b.maxIdleContexts && ctx.alive {
 		b.queue = append(b.queue, ctx)
 		b.lock.Unlock()
 	} else {
