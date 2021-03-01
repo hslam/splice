@@ -24,18 +24,17 @@ const (
 var ErrSyscallConn = errors.New("The net.Conn do not implements the syscall.Conn interface")
 
 // newContext returns a new context.
-func newContext(b *bucket) (*context, error) {
+func newContext(b *bucket) (ctx *context, err error) {
 	var p [2]int
 	syscall.ForkLock.RLock()
-	err := syscall.Pipe(p[0:])
-	if err != nil {
-		syscall.ForkLock.RUnlock()
-		return nil, err
+	err = syscall.Pipe(p[0:])
+	if err == nil {
+		syscall.CloseOnExec(p[0])
+		syscall.CloseOnExec(p[1])
+		ctx = &context{reader: int(p[0]), writer: int(p[1]), bucket: b}
 	}
-	syscall.CloseOnExec(p[0])
-	syscall.CloseOnExec(p[1])
 	syscall.ForkLock.RUnlock()
-	return &context{reader: int(p[0]), writer: int(p[1]), bucket: b}, nil
+	return ctx, err
 }
 
 // Close closes the context.
@@ -101,8 +100,8 @@ func Splice(dst, src net.Conn, len int64) (n int64, err error) {
 }
 
 func netFd(conn net.Conn) (int, error) {
-	syscallConn, dstOk := conn.(syscall.Conn)
-	if !dstOk {
+	syscallConn, ok := conn.(syscall.Conn)
+	if !ok {
 		return 0, ErrSyscallConn
 	}
 	return fd(syscallConn)
@@ -110,11 +109,11 @@ func netFd(conn net.Conn) (int, error) {
 
 func fd(c syscall.Conn) (int, error) {
 	var nfd int
-	dstRaw, err := c.SyscallConn()
+	raw, err := c.SyscallConn()
 	if err != nil {
 		return 0, err
 	}
-	dstRaw.Control(func(fd uintptr) {
+	raw.Control(func(fd uintptr) {
 		nfd = int(fd)
 	})
 	return nfd, nil
@@ -122,8 +121,4 @@ func fd(c syscall.Conn) (int, error) {
 
 func splice(rfd int, roff *int64, wfd int, woff *int64, len int, flags int) (n int64, err error) {
 	return syscall.Splice(rfd, roff, wfd, woff, len, flags)
-}
-
-func tee(rfd int, wfd int, len int, flags int) (n int64, err error) {
-	return syscall.Tee(rfd, wfd, len, flags)
 }
